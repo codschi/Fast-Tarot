@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>塔羅牌抽牌系統</title>
+    <title>塔羅牌抽牌小工具</title>
     <style>
         body {
             font-family: 'Microsoft JhengHei', Arial, sans-serif;
@@ -150,6 +150,31 @@
             margin: 20px 0;
             color: #6B46C1;
         }
+        .random-indicator {
+            display: inline-block;
+            font-size: 12px;
+            padding: 2px 8px;
+            border-radius: 20px;
+            margin-left: 8px;
+            background-color: #C6F6D5;
+            color: #22543D;
+            vertical-align: middle;
+        }
+        .card-placeholder {
+            width: 180px;
+            height: 300px;
+            margin: 0 auto 15px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #f8f4ff;
+            border: 1px dashed #d8c8ff;
+            border-radius: 8px;
+            color: #6B46C1;
+            font-size: 14px;
+            text-align: center;
+            padding: 10px;
+        }
         @media (max-width: 600px) {
             .container {
                 padding: 15px;
@@ -163,8 +188,8 @@
 </head>
 <body>
     <div class="container">
-        <h1>塔羅牌抽牌小工具</h1>
-        
+        <!-- <h1>塔羅牌抽牌系統 <span class="random-indicator">真隨機</span></h1> -->
+        <h1>塔羅牌抽牌小工具 </h1>
         <button id="quickDrawBtn" class="quick-btn">
             <span>快速抽一張牌</span>
         </button>
@@ -183,7 +208,8 @@
         
         <div class="info">
             <p>本抽牌系統使用完整的78張塔羅牌組，包含大阿爾卡納和小阿爾卡納。</p>
-            <p>牌面圖片使用的是公共領域的塔羅牌圖像。</p>
+            <!-- <p>每張牌都有50%的機率為正位或逆位。</p>
+            <p>使用Random.org提供的大氣噪聲生成真隨機數，確保抽牌結果的真正隨機性。</p> -->
         </div>
     </div>
 
@@ -292,6 +318,57 @@
         // 卡片數量
         let cardCount = 1;
         
+        // 隨機數緩存，避免過多的API調用
+        let randomNumberCache = [];
+        
+        // 獲取真隨機數
+        async function getTrueRandomNumbers(min, max, count) {
+            try {
+                const response = await fetch(`https://www.random.org/integers/?num=${count}&min=${min}&max=${max}&col=1&base=10&format=plain&rnd=new`);
+                if (!response.ok) {
+                    throw new Error('無法從Random.org獲取隨機數');
+                }
+                
+                const data = await response.text();
+                return data.trim().split('\n').map(Number);
+            } catch (error) {
+                console.warn('使用真隨機數時出錯:', error);
+                
+                // 返回使用偽隨機數生成的數字
+                return Array.from({length: count}, () => Math.floor(Math.random() * (max - min + 1)) + min);
+            }
+        }
+        
+        // 獲取單個隨機數（從緩存或新獲取）
+        async function getRandomNumber(min, max) {
+            // 如果緩存中有數字，從緩存中取並調整到正確範圍
+            if (randomNumberCache.length > 0) {
+                // 從緩存中取得一個隨機數
+                const cachedNumber = randomNumberCache.pop();
+                
+                // 將緩存中的數字(0-100範圍)映射到需要的範圍(min-max)
+                // 確保產生的隨機數在min和max之間
+                return min + (cachedNumber % (max - min + 1));
+            }
+            
+            // 否則獲取新的一批隨機數（使用實際需要的範圍）
+            try {
+                const newNumbers = await getTrueRandomNumbers(min, max, 20);
+                randomNumberCache = newNumbers;
+                return randomNumberCache.pop() || Math.floor(Math.random() * (max - min + 1)) + min;
+            } catch (error) {
+                console.error('無法獲取真隨機數:', error);
+                // 如果無法獲取真隨機數，則使用偽隨機數
+                return Math.floor(Math.random() * (max - min + 1)) + min;
+            }
+        }
+        
+        // 獲取布爾隨機值（是/否）
+        async function getRandomBoolean() {
+            const num = await getRandomNumber(0, 1);
+            return num === 1;
+        }
+        
         // 更新卡片數量顯示
         function updateCardCount() {
             cardCountEl.textContent = cardCount;
@@ -315,76 +392,141 @@
             }
         });
 
-        // 預加載所有圖片
-        function preloadImages() {
-            tarotDeck.forEach(card => {
-                const img = new Image();
-                img.src = card.image;
-            });
+        // 創建卡片內容
+        function createCardContent(card, isReversed) {
+            // 安全檢查：確保卡片數據存在
+            if (!card) {
+                console.error('嘗試創建無效的卡片');
+                return '<div class="card-placeholder">無效的卡片數據</div>';
+            }
+            
+            // 確保卡片圖片存在，否則使用佔位符
+            const hasValidImage = card.image && typeof card.image === 'string';
+            const imageHtml = hasValidImage 
+                ? `<img src="${card.image}" class="card-image ${isReversed ? 'reversed' : ''}" alt="${card.name}" onerror="this.onerror=null; this.parentNode.innerHTML='<div class=\\'card-placeholder\\'>圖片無法載入</div>';">`
+                : `<div class="card-placeholder">圖片不可用</div>`;
+            
+            return `
+                ${imageHtml}
+                <div class="card-name ${isReversed ? 'reversed-text' : 'upright'}">
+                    ${card.number ? card.number + ' - ' : ''}${card.name}
+                </div>
+                ${card.suit ? `<div class="suit">牌組：${card.suit}</div>` : ''}
+                <div class="position ${isReversed ? 'reversed-text' : 'upright'}">
+                    ${isReversed ? '逆位 ↓' : '正位 ↑'}
+                </div>
+            `;
         }
 
         // 抽牌函數
-        function drawCards() {
+        async function drawCards() {
             // 顯示加載訊息
             loadingMsg.style.display = 'block';
             
             // 清空卡片容器
             cardContainer.innerHTML = '';
             
-            // 延遲一下以讓加載訊息顯示
-            setTimeout(() => {
+            try {
                 // 創建牌組副本
                 const deckCopy = [...tarotDeck];
+                
+                if (deckCopy.length === 0) {
+                    throw new Error('牌組為空');
+                }
                 
                 // 抽指定數量的牌
                 for (let i = 0; i < cardCount; i++) {
                     if (deckCopy.length === 0) break;
                     
-                    // 隨機選一張牌
-                    const randomIndex = Math.floor(Math.random() * deckCopy.length);
+                    // 隨機選一張牌 - 範圍從0到當前牌組長度減1
+                    const randomIndex = await getRandomNumber(0, deckCopy.length - 1);
+                    
+                    // 安全檢查：確保索引在有效範圍內
+                    if (randomIndex < 0 || randomIndex >= deckCopy.length) {
+                        console.error(`無效的隨機索引: ${randomIndex}, 牌組長度: ${deckCopy.length}`);
+                        continue;
+                    }
+                    
                     const card = deckCopy.splice(randomIndex, 1)[0];
                     
                     // 隨機決定正逆位
-                    const isReversed = Math.random() > 0.5;
+                    const isReversed = await getRandomBoolean();
                     
                     // 創建卡片元素
                     const cardElement = document.createElement('div');
                     cardElement.className = 'card';
                     
                     // 設置卡片內容
-                    cardElement.innerHTML = `
-                        <img src="${card.image}" class="card-image ${isReversed ? 'reversed' : ''}" alt="${card.name}">
-                        <div class="card-name ${isReversed ? 'reversed-text' : 'upright'}">
-                            ${card.number ? card.number + ' - ' : ''}${card.name}
-                        </div>
-                        ${card.suit ? `<div class="suit">牌組：${card.suit}</div>` : ''}
-                        <div class="position ${isReversed ? 'reversed-text' : 'upright'}">
-                            ${isReversed ? '逆位 ↓' : '正位 ↑'}
-                        </div>
-                    `;
+                    cardElement.innerHTML = createCardContent(card, isReversed);
                     
                     // 添加到容器
                     cardContainer.appendChild(cardElement);
                 }
-                
+            } catch (error) {
+                console.error('抽牌過程中出錯:', error);
+                // 發生錯誤時，使用原始的偽隨機方法作為備用
+                fallbackDrawCards();
+            } finally {
                 // 隱藏加載訊息
                 loadingMsg.style.display = 'none';
-            }, 500);
+            }
+        }
+        
+        // 備用的偽隨機抽牌函數（在真隨機失敗時使用）
+        function fallbackDrawCards() {
+            console.log('使用備用偽隨機抽牌');
+            // 創建牌組副本
+            const deckCopy = [...tarotDeck];
+            
+            // 抽指定數量的牌
+            for (let i = 0; i < cardCount; i++) {
+                if (deckCopy.length === 0) break;
+                
+                // 隨機選一張牌
+                const randomIndex = Math.floor(Math.random() * deckCopy.length);
+                const card = deckCopy.splice(randomIndex, 1)[0];
+                
+                if (!card) continue; // 安全檢查
+                
+                // 隨機決定正逆位
+                const isReversed = Math.random() > 0.5;
+                
+                // 創建卡片元素
+                const cardElement = document.createElement('div');
+                cardElement.className = 'card';
+                
+                // 設置卡片內容
+                cardElement.innerHTML = createCardContent(card, isReversed);
+                
+                // 添加到容器
+                cardContainer.appendChild(cardElement);
+            }
         }
 
         // 快速抽一張牌
-        quickDrawBtn.addEventListener('click', () => {
+        quickDrawBtn.addEventListener('click', async () => {
             cardCount = 1;
             updateCardCount();
-            drawCards();
+            await drawCards();
         });
 
         // 一般抽牌
-        drawBtn.addEventListener('click', drawCards);
+        drawBtn.addEventListener('click', async () => {
+            await drawCards();
+        });
 
         // 初始化
         updateCardCount();
-        preloadImages();
+        
+        // 初始加載一些隨機數到緩存 - 使用較小的範圍(0-100)
+        getTrueRandomNumbers(0, 100, 40)
+            .then(numbers => {
+                randomNumberCache = numbers;
+                console.log('已預加載真隨機數');
+            })
+            .catch(error => {
+                console.warn('初始加載隨機數失敗:', error);
+            });
     </script>
 </body>
 </html>
